@@ -4,6 +4,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+# Baca file CSV asli yang besar
+df = pd.read_csv("PRSA_Data_Cleaned.csv")
+
+# Simpan dalam bentuk kompresi .csv.gz (ukurannya akan jauh di bawah 25MB)
+df.to_csv("PRSA_Data_Cleaned.csv.gz", index=False, compression="gzip")
+
 # 1. Konfigurasi Halaman Streamlit
 st.set_page_config(
     page_title="Analisis Kualitas Udara di Beijing",
@@ -14,7 +20,7 @@ st.set_page_config(
 # 2. Function untuk Load dan Preprocessing Data
 @st.cache_data
 def load_data():
-    df = pd.read_csv("PRSA_Data_Cleaned.csv")
+    df = pd.read_csv("PRSA_Data_Cleaned.csv.gz")
     
     # Menghitung Total Gas Index jika belum ada
     if 'Total_Gas_Index' not in df.columns:

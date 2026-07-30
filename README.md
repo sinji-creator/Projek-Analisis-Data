@@ -7,5 +7,5 @@ pip freeze > requirements.txt
 
 ## Run steamlit app
 ```
-streamlit run app.py
+streamlit run dashboard.py
 ```

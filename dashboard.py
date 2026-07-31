@@ -20,6 +20,17 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# Function untuk Interpolasi ISPU
+def hitung_sub_indeks(nilai, batas_konsentrasi, batas_indeks):
+    if pd.isna(nilai):
+        return np.nan
+    for i in range(len(batas_konsentrasi) - 1):
+        if batas_konsentrasi[i] <= nilai <= batas_konsentrasi[i+1]:
+            C_low, C_high = batas_konsentrasi[i], batas_konsentrasi[i+1]
+            I_low, I_high = batas_indeks[i], batas_indeks[i+1]
+            return ((I_high - I_low) / (C_high - C_low)) * (nilai - C_low) + I_low
+    return 500  # Batas ekstrem
+
 # 2. Function untuk Load dan Preprocessing Data
 @st.cache_data
 def load_data():
@@ -27,28 +38,40 @@ def load_data():
     
     # Membuat kolom 'date' gabungan dari year, month, day
     df['date'] = pd.to_datetime(df[['year', 'month', 'day']])
-    
-    # Menghitung Total Gas Index jika belum ada
-    if 'Total_Gas_Index' not in df.columns:
-        so2_norm = (df['SO2'] - df['SO2'].min()) / (df['SO2'].max() - df['SO2'].min())
-        no2_norm = (df['NO2'] - df['NO2'].min()) / (df['NO2'].max() - df['NO2'].min())
-        co_norm = (df['CO'] - df['CO'].min()) / (df['CO'].max() - df['CO'].min())
-        o3_norm = (df['O3'] - df['O3'].min()) / (df['O3'].max() - df['O3'].min())
-        df['Total_Gas_Index'] = so2_norm + no2_norm + co_norm + o3_norm
+
+    # Skala Indeks Standar ISPU
+    skala_indeks = [0, 50, 100, 200, 300, 500]
+
+    # --- 1. Kalkulasi Sub-Indeks ISPU Tiap Polutan
+    df['I_PM25'] = df['PM2.5'].apply(lambda x: hitung_sub_indeks(x, [0, 15, 35, 55, 150, 500], skala_indeks))
+    df['I_PM10'] = df['PM10'].apply(lambda x: hitung_sub_indeks(x, [0, 50, 150, 250, 350, 500], skala_indeks))
+    df['I_SO2']  = df['SO2'].apply(lambda x: hitung_sub_indeks(x, [0, 40, 80, 380, 800, 1600], skala_indeks))
+    df['I_NO2']  = df['NO2'].apply(lambda x: hitung_sub_indeks(x, [0, 40, 80, 180, 280, 565], skala_indeks))
+    df['I_O3']   = df['O3'].apply(lambda x: hitung_sub_indeks(x, [0, 50, 100, 168, 208, 748], skala_indeks))
+    df['I_CO']   = (df['CO'] / 1000).apply(lambda x: hitung_sub_indeks(x, [0, 2, 4, 9, 15, 32], skala_indeks))
+
+    # --- 2. Menentukan Critical Pollutant (Nilai Maksimum Gabungan)
+    df['Indeks_Gabungan'] = df[['I_PM25', 'I_PM10', 'I_SO2', 'I_NO2', 'I_O3', 'I_CO']].max(axis=1)
+
+    # --- 3. Pengkategorian Kualitas Udara Berdasarkan Indeks Gabungan
+    bins = [-np.inf, 50, 100, 200, 300, np.inf]
+    labels = ['Baik', 'Sedang', 'Tidak Sehat', 'Sangat Tidak Sehat', 'Berbahaya']
+    df['Kategori_Gabungan'] = pd.cut(df['Indeks_Gabungan'], bins=bins, labels=labels)
 
     # Pengkategorian Kualitas Udara Gabungan Berdasarkan PM2.5
-    def categorize_air_quality(row):
-        pm = row['PM2.5']
-        if pm <= 35:
+    def categorize_ispu(indeks):
+        if pd.isna(indeks):
+            return np.nan
+        elif indeks <= 50:
             return 'Baik'
-        elif pm <= 75:
+        elif indeks <= 100:
             return 'Sedang'
-        elif pm <= 150:
+        elif indeks <= 200:
             return 'Tidak Sehat'
         else:
             return 'Sangat Tidak Sehat / Berbahaya'
 
-    df['Kategori_Gabungan'] = df.apply(categorize_air_quality, axis=1)
+    df['Kategori_Gabungan'] = df['Indeks_Gabungan'].apply(categorize_ispu)
     return df
 
 # Load Data Utama
@@ -88,16 +111,28 @@ selected_stations = st.sidebar.multiselect(
 min_date = df_raw['date'].min().date()
 max_date = df_raw['date'].max().date()
 
+# st.date_input sudah mendukung ketik manual di UI Streamlit.
+# Tambahkan 'format' dan 'help' agar pengguna tahu format ketik manualnya (DD/MM/YYYY)
 date_range = st.sidebar.date_input(
     "Pilih Rentang Tanggal (Mulai - Selesai):",
     value=(min_date, max_date),
     min_value=min_date,
-    max_value=max_date
+    max_value=max_date,
+    format="DD/MM/YYYY",
+    help="Anda dapat mengeklik kalender atau mengetik tanggal secara manual dengan format DD/MM/YYYY"
 )
 
-# Proteksi penanganan input tanggal
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date, end_date = date_range
+# Proteksi penanganan input tanggal (Termasuk saat user sedang mengetik manual di Streamlit)
+if isinstance(date_range, (tuple, list)):
+    if len(date_range) == 2:
+        # Jika pengguna sudah selesai memilih/mengetik rentang tanggal lengkap
+        start_date, end_date = date_range
+    elif len(date_range) == 1:
+        # Jika pengguna baru mengetik/mengeklik 1 tanggal (belum selesai)
+        start_date = date_range[0]
+        end_date = max_date
+    else:
+        start_date, end_date = min_date, max_date
 else:
     start_date, end_date = min_date, max_date
 
@@ -128,19 +163,31 @@ if menu == "1. Peringkat & Akumulasi Polusi Per Stasiun (Terendah ke Tertinggi)"
     """)
     st.write("")
 
-    # Hitung Aggregasi Data dari df yang ter-filter
+    # 1. Agregasi Rata-rata Partikulat (PM2.5 & PM10) per Stasiun
     tabel_pm25 = df.groupby('station')['PM2.5'].mean().to_frame('PM2.5_mean').sort_values(by='PM2.5_mean', ascending=True)
     tabel_pm10 = df.groupby('station')['PM10'].mean().to_frame('PM10_mean').sort_values(by='PM10_mean', ascending=True)
-    tabel_gas_sorted = df.groupby('station')['Total_Gas_Index'].mean().to_frame('Total_Gas_Index').sort_values(by='Total_Gas_Index', ascending=True)
 
+    # 2. Agregasi Rata-rata Gas per Stasiun & Hitung Total_Gas_Index (Sesuai Metode Notebook)
+    gas_pollutants = ['SO2', 'NO2', 'CO', 'O3']
+    tabel_gas_kota = df.groupby('station')[gas_pollutants].mean()
+
+    tabel_gas_kota['Total_Gas_Index'] = (
+        (tabel_gas_kota['SO2'] / tabel_gas_kota['SO2'].max()) +
+        (tabel_gas_kota['NO2'] / tabel_gas_kota['NO2'].max()) +
+        (tabel_gas_kota['CO'] / tabel_gas_kota['CO'].max()) +
+        (tabel_gas_kota['O3'] / tabel_gas_kota['O3'].max())
+    )
+    tabel_gas_sorted = tabel_gas_kota.sort_values(by='Total_Gas_Index', ascending=True)
+
+    # 3. Ambil Nilai Tertinggi untuk Card Metric
     top_pm25_st, top_pm25_val = tabel_pm25.index[-1], tabel_pm25['PM2.5_mean'].iloc[-1]
     top_pm10_st, top_pm10_val = tabel_pm10.index[-1], tabel_pm10['PM10_mean'].iloc[-1]
     top_gas_st, top_gas_val = tabel_gas_sorted.index[-1], tabel_gas_sorted['Total_Gas_Index'].iloc[-1]
 
-    # Hitung rata-rata gabungan stasiun sebagai baseline pembanding delta
+    # 4. Hitung Rata-rata Baseline Seluruh Stasiun untuk Pembanding Delta
     avg_pm25_all = df['PM2.5'].mean()
     avg_pm10_all = df['PM10'].mean()
-    avg_gas_all = df['Total_Gas_Index'].mean()
+    avg_gas_all = tabel_gas_sorted['Total_Gas_Index'].mean()
 
     diff_pm25 = top_pm25_val - avg_pm25_all
     diff_pm10 = top_pm10_val - avg_pm10_all
@@ -285,20 +332,63 @@ elif menu == "2. Pola Distribusi Harian Stasiun Terburuk":
         }
 
     st.subheader("📊 Grafik Visualisasi Data")
-    m1, m2 = st.columns(2)
-    with m1:
+
+    # ==============================================================================
+    # BARIS 1 (KOLOM 1, 2, 3): PM2.5, PM10, SO2
+    # ==============================================================================
+    row1_col1, row1_col2, row1_col3 = st.columns(3)
+
+    with row1_col1:
         st.metric(
             label=f"Jam Puncak PM2.5 ({peak_summary['PM2.5']['stasiun']})", 
             value=f"Pukul {peak_summary['PM2.5']['jam']:02d}:00",
             delta=f"+{peak_summary['PM2.5']['nilai']:.1f} µg/m³",
-            delta_color="inverse" # Bernilai positif (+) otomatis berwarna MERAH tanpa panah
+            delta_color="inverse"
         )
-    with m2:
+
+    with row1_col2:
         st.metric(
             label=f"Jam Puncak PM10 ({peak_summary['PM10']['stasiun']})", 
             value=f"Pukul {peak_summary['PM10']['jam']:02d}:00",
             delta=f"+{peak_summary['PM10']['nilai']:.1f} µg/m³",
-            delta_color="inverse" # Bernilai positif (+) otomatis berwarna MERAH tanpa panah
+            delta_color="inverse"
+        )
+
+    with row1_col3:
+        st.metric(
+            label=f"Jam Puncak SO₂ ({peak_summary['SO2']['stasiun']})", 
+            value=f"Pukul {peak_summary['SO2']['jam']:02d}:00",
+            delta=f"+{peak_summary['SO2']['nilai']:.1f} µg/m³",
+            delta_color="inverse"
+        )
+
+    # ==============================================================================
+    # BARIS 2 (KOLOM 1, 2, 3): NO2, CO, O3
+    # ==============================================================================
+    row2_col1, row2_col2, row2_col3 = st.columns(3)
+
+    with row2_col1:
+        st.metric(
+            label=f"Jam Puncak NO₂ ({peak_summary['NO2']['stasiun']})", 
+            value=f"Pukul {peak_summary['NO2']['jam']:02d}:00",
+            delta=f"+{peak_summary['NO2']['nilai']:.1f} µg/m³",
+            delta_color="inverse"
+        )
+
+    with row2_col2:
+        st.metric(
+            label=f"Jam Puncak CO ({peak_summary['CO']['stasiun']})", 
+            value=f"Pukul {peak_summary['CO']['jam']:02d}:00",
+            delta=f"+{peak_summary['CO']['nilai']:.1f} µg/m³",
+            delta_color="inverse"
+        )
+
+    with row2_col3:
+        st.metric(
+            label=f"Jam Puncak O₃ ({peak_summary['O3']['stasiun']})", 
+            value=f"Pukul {peak_summary['O3']['jam']:02d}:00",
+            delta=f"+{peak_summary['O3']['nilai']:.1f} µg/m³",
+            delta_color="inverse"
         )
 
     # SUBHEADER GRAFIK DENGAN LOGO BAR CHART
@@ -380,71 +470,88 @@ elif menu == "2. Pola Distribusi Harian Stasiun Terburuk":
 # MENU 3: DISTRIBUSI TINGKAT PENCEMARAN UDARA GABUNGAN
 # ==============================================================================
 elif menu == "3. Distribusi Tingkat Pencemaran Udara Gabungan":
-    st.header("Distribusi Tingkat Pencemaran Udara Gabungan per Stasiun")
+    st.header("Distribusi Tingkat Pencemaran Udara Gabungan per Stasiun 📊")
     
     st.markdown("""
     #### ❓ **Pertanyaan Bisnis 3**
-    > **Bagaimana pengelompokan data kualitas udara berdasarkan tingkat konsentrasi gabungan polutan ke dalam kategori Baik, Sedang, Tidak Sehat, dan Sangat Tidak Sehat selama periode pemantauan, sehingga dapat diketahui distribusi tingkat pencemaran udara pada setiap stasiun?**
+    > **Bagaimana pengelompokan data kualitas udara berdasarkan tingkat ISPU gabungan ke dalam kategori Baik, Sedang, Tidak Sehat, dan Sangat Tidak Sehat / Berbahaya pada setiap stasiun pemantau?**
     """)
     st.write("")
 
+    # 1. Hitung Persentase Distribusi Kategori per Stasiun
     cat_df = pd.crosstab(df['station'], df['Kategori_Gabungan'], normalize='index') * 100
-    categories = ['Baik', 'Sedang', 'Tidak Sehat', 'Sangat Tidak Sehat / Berbahaya']
     
+    # Kunci urutan kategori agar rapi dari Baik ke Berbahaya
+    categories = ['Baik', 'Sedang', 'Tidak Sehat', 'Sangat Tidak Sehat / Berbahaya']
     existing_cats = [c for c in categories if c in cat_df.columns]
     cat_df = cat_df.reindex(columns=existing_cats)
 
-    if 'Sangat Tidak Sehat / Berbahaya' in cat_df.columns:
-        series_danger = cat_df['Sangat Tidak Sehat / Berbahaya'].dropna()
-        if not series_danger.empty:
-            max_danger_st, max_danger_val = series_danger.idxmax(), series_danger.max()
-            min_danger_st, min_danger_val = series_danger.idxmin(), series_danger.min()
-            diff_danger = max_danger_val - min_danger_val
+    # 2. METRIK HIGHLIGHT (Stasiun dengan persentase buruk tertinggi)
+    unhealthy_cols = [c for c in ['Tidak Sehat', 'Sangat Tidak Sehat / Berbahaya'] if c in cat_df.columns]
+    
+    # Inisialisasi status data buruk
+    has_bad_data = False
 
-            st.subheader("📊 Grafik Visualisasi Data")
+    if unhealthy_cols:
+        cat_df['Total_Buruk'] = cat_df[unhealthy_cols].sum(axis=1)
+        # Pastikan kolom Total_Buruk tidak kosong / tidak nol semua
+        if not cat_df['Total_Buruk'].dropna().empty:
+            has_bad_data = True
+            max_bad_st, max_bad_val = cat_df['Total_Buruk'].idxmax(), cat_df['Total_Buruk'].max()
+            min_bad_st, min_bad_val = cat_df['Total_Buruk'].idxmin(), cat_df['Total_Buruk'].min()
+            diff_bad = max_bad_val - min_bad_val
+
             m1, m2 = st.columns(2)
             with m1:
                 st.metric(
-                    label=f"Risiko Berbahaya Tertinggi ({max_danger_st})", 
-                    value=f"{max_danger_val:.2f}%",
-                    delta=f"+{diff_danger:.2f}%",
-                    delta_color="inverse" # Nilai Positif (+) otomatis MERAH tanpa panah
+                    label=f"Risiko Udara Buruk Tertinggi ({max_bad_st})", 
+                    value=f"{max_bad_val:.1f}%",
+                    delta=f"+{diff_bad:.1f}%",
+                    delta_color="inverse"
                 )
             with m2:
                 st.metric(
-                    label=f"Risiko Berbahaya Terendah ({min_danger_st})", 
-                    value=f"{min_danger_val:.2f}%",
-                    delta=f"-{diff_danger:.2f}%",
-                    delta_color="inverse" # Nilai Negatif (-) otomatis HIJAU tanpa panah
+                    label=f"Risiko Udara Buruk Terendah ({min_bad_st})", 
+                    value=f"{min_bad_val:.1f}%",
+                    delta=f"-{diff_bad:.1f}%",
+                    delta_color="inverse"
                 )
 
-
-    # SUBHEADER GRAFIK DENGAN LOGO BAR CHART
+    st.markdown("---")
+    st.subheader("📊 Grafik Visualisasi Data")
     st.write("")
 
-    # GRAFIK PERTANYAAN 3
-    colors = ['#2ecc71', '#f1c40f', '#e67e22', '#e74c3c']
+    # 3. GRAFIK STACKED BAR CHART (4 WARNA ISPU)
+    palette_colors = {
+        'Baik': '#2ecc71',
+        'Sedang': '#f1c40f',
+        'Tidak Sehat': '#e67e22',
+        'Sangat Tidak Sehat / Berbahaya': '#e74c3c'
+    }
+    color_list = [palette_colors[c] for c in existing_cats]
+
     fig3, ax = plt.subplots(figsize=(12, 6))
-    cat_df.plot(kind='bar', stacked=True, color=colors[:len(existing_cats)], ax=ax, width=0.5)
+    cat_df[existing_cats].plot(kind='bar', stacked=True, color=color_list, ax=ax, width=0.55)
     
-    ax.set_title("Distribusi Tingkat Pencemaran Udara Gabungan per Stasiun", fontsize=14, fontweight='bold', pad=15)
+    ax.set_title("Distribusi Kategori Kualitas Udara ISPU per Stasiun", fontsize=14, fontweight='bold', pad=15)
     ax.set_xlabel("Stasiun Pemantau", fontsize=12, labelpad=10)
     ax.set_ylabel("Persentase Distribusi (%)", fontsize=12)
     ax.set_ylim(0, 105)
     plt.xticks(rotation=45, ha='right', fontsize=10)
     
-    ax.legend(title="Kategori Kualitas Udara", bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True)
+    ax.legend(title="Kategori ISPU", bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True)
+    ax.grid(axis='y', linestyle='--', alpha=0.3)
     
     plt.tight_layout()
     st.pyplot(fig3)
-
-    # INSIGHT DINAMIS UNTUK PERTANYAAN 3
+    
+    # 4. INSIGHT DINAMIS UNTUK PERTANYAAN 3
     st.subheader("💡 Insight Pertanyaan 3")
-    if 'Sangat Tidak Sehat / Berbahaya' in cat_df.columns and not series_danger.empty:
+    if has_bad_data:
         st.markdown(f"""
-        * **Dominasi Kategori Berbahaya:** Pada rentang waktu dan stasiun yang dipilih, persentase kategori **Sangat Tidak Sehat / Berbahaya** berkisar antara **{min_danger_val:.2f}% hingga {max_danger_val:.2f}%**.
-        * **Stasiun Terburuk:** Stasiun **{max_danger_st}** mencatatkan persentase kategori berbahaya tertinggi, yaitu **{max_danger_val:.2f}%**.
-        * **Stasiun Relatif Aman:** Stasiun **{min_danger_st}** memiliki persentase kategori berbahaya terendah yaitu **{min_danger_val:.2f}%**.
+        * **Kombinasi Udara Buruk:** Persentase akumulasi kategori **Tidak Sehat** hingga **Sangat Tidak Sehat / Berbahaya** antar stasiun berkisar antara **{min_bad_val:.2f}% hingga {max_bad_val:.2f}%**.
+        * **Stasiun Berisiko Tertinggi:** Stasiun **{max_bad_st}** mencatatkan gabungan persentase kategori udara buruk tertinggi, yaitu **{max_bad_val:.2f}%**.
+        * **Stasiun Relatif Aman:** Stasiun **{min_bad_st}** memiliki persentase kategori udara buruk terendah yaitu **{min_bad_val:.2f}%**.
         """)
     else:
-        st.info("ℹ️ Tidak ditemukan data kategori 'Sangat Tidak Sehat / Berbahaya' untuk kombinasi filter ini.")
+        st.info("ℹ️ Kualitas udara pada rentang filter ini sangat baik (tidak ditemukan data kategori 'Tidak Sehat' maupun 'Sangat Tidak Sehat / Berbahaya').")

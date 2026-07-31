@@ -1,11 +1,17 @@
 # 🍃 Beijing Air Quality Dataset 📊
 
-## Setup Environment - Shell/Terminal VS Code
+## Setup Environment 
 ```
-pip freeze > requirements.txt
+python -m venv venv
+.\venv\Scripts\activate
+```
+
+## Install Library / Dependencies
+```
+pip install -r requirements.txt
 ```
 
 ## Run steamlit app
 ```
-streamlit run dashboard.py
+streamlit run dashboard/dashboard.py
 ```

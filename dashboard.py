@@ -501,6 +501,7 @@ elif menu == "3. Distribusi Tingkat Pencemaran Udara Gabungan":
             min_bad_st, min_bad_val = cat_df['Total_Buruk'].idxmin(), cat_df['Total_Buruk'].min()
             diff_bad = max_bad_val - min_bad_val
 
+            st.subheader("📊 Grafik Visualisasi Data")
             m1, m2 = st.columns(2)
             with m1:
                 st.metric(
@@ -517,7 +518,6 @@ elif menu == "3. Distribusi Tingkat Pencemaran Udara Gabungan":
                     delta_color="inverse"
                 )
 
-    st.subheader("📊 Grafik Visualisasi Data")
     st.write("")
 
     # 3. GRAFIK STACKED BAR CHART (4 WARNA ISPU)

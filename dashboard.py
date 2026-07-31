@@ -23,7 +23,7 @@ st.markdown("""
 # 2. Function untuk Load dan Preprocessing Data
 @st.cache_data
 def load_data():
-    df = pd.read_csv("dashboard/PRSA_Data_Cleaned.zip")
+    df = pd.read_csv("PRSA_Data_Cleaned.zip")
     
     # Membuat kolom 'date' gabungan dari year, month, day
     df['date'] = pd.to_datetime(df[['year', 'month', 'day']])

@@ -517,7 +517,6 @@ elif menu == "3. Distribusi Tingkat Pencemaran Udara Gabungan":
                     delta_color="inverse"
                 )
 
-    st.markdown("---")
     st.subheader("📊 Grafik Visualisasi Data")
     st.write("")
 

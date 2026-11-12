@@ -474,7 +474,7 @@ elif menu == "3. Distribusi Tingkat Pencemaran Udara Gabungan":
     
     st.markdown("""
     #### ❓ **Pertanyaan Bisnis 3**
-    > **Bagaimana pengelompokan data kualitas udara berdasarkan tingkat ISPU gabungan ke dalam kategori Baik, Sedang, Tidak Sehat, dan Sangat Tidak Sehat / Berbahaya pada setiap stasiun pemantau?**
+    > **Bagaimana distribusi persentase kategori kualitas udara berdasarkan ISPU gabungan (Baik, Sedang, Tidak Sehat, dan Sangat Tidak Sehat/Berbahaya) pada setiap stasiun pemantau selama periode Maret 2013–Februari 2017, serta stasiun mana yang memiliki persentase kategori Tidak Sehat hingga Berbahaya tertinggi sebagai dasar penentuan prioritas pemantauan kualitas udara?**
     """)
     st.write("")
 
